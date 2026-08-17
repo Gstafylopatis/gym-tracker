@@ -530,11 +530,27 @@ function exDone(date, exId) { return setsOf(date, exId).length >= getEx(exId).se
 
 /* ───────────────────────── Mutations ───────────────────────── */
 
+/* A session's day type follows the work actually logged in it: majority of
+   the logged exercises' day types wins; ties keep the stored label. */
+function majorityDay(sess) {
+  const counts = {};
+  for (const id of Object.keys(sess.sets || {})) {
+    if ((sess.sets[id] || []).length) {
+      const d = getEx(id).day;
+      counts[d] = (counts[d] || 0) + 1;
+    }
+  }
+  const best = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  if (!best.length) return sess.day;
+  if (best[1] && best[1][1] === best[0][1]) return DAY_LABEL[sess.day] ? sess.day : best[0][0];
+  return best[0][0];
+}
+
 function logSet(date, exId, r, kg) {
   const sess = store.sessions[date] || (store.sessions[date] = { day: dayType(date) === 'rest' ? getEx(exId).day : dayType(date), sets: {} });
   if (!sess.sets) sess.sets = {};
-  if (sess.day === 'rest') sess.day = getEx(exId).day;
   (sess.sets[exId] = sess.sets[exId] || []).push({ r, kg });
+  sess.day = majorityDay(sess);
   save();
 }
 function removeSet(date, exId, idx) {
@@ -544,6 +560,7 @@ function removeSet(date, exId, idx) {
   const sess = store.sessions[date];
   if (sets.length === 0) delete sess.sets[exId];
   if (!isWorkout(sess) && Object.keys(sess.sets).length === 0) delete store.sessions[date];
+  else sess.day = majorityDay(sess);
   save();
 }
 function updateSet(date, exId, idx, r, kg) {
@@ -703,9 +720,12 @@ function renderToday() {
       '<div class="sub" style="margin-top: 6px;">Recovery is where the muscle gets built.<br>Feeling fresh anyway? Switch the day type below.</div></div>';
   }
 
-  const seg = ['push', 'pull', 'rest'].map((t) =>
-    '<button class="seg-btn' + (t === type ? ' on' : '') + '" data-act="daytype" data-type="' + t + '">' +
-    t[0].toUpperCase() + t.slice(1) + '</button>').join('');
+  // The day-type switch only makes sense before anything is logged; once
+  // sets exist the session's type follows the logged work automatically.
+  const segRow = isWorkout(sessionOf(date)) ? '' :
+    '<div class="seg-row">' + ['push', 'pull', 'rest'].map((t) =>
+      '<button class="seg-btn' + (t === type ? ' on' : '') + '" data-act="daytype" data-type="' + t + '">' +
+      t[0].toUpperCase() + t.slice(1) + '</button>').join('') + '</div>';
 
   const totalSets = items.reduce((n, it) => n + setsOf(date, it.id).length, 0);
   const countLabel = items.length
@@ -718,10 +738,10 @@ function renderToday() {
     ring(52, 5, items.length ? doneCount / items.length : 0, '<span style="font-size: 12px; font-weight: 700;">' + doneCount + '/' + (items.length || 0) + '</span>', '') +
     '</div>' +
     '<div class="sub" style="margin-bottom: 12px;">' + countLabel + '</div>' +
-    '<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">' +
-    '<div class="seg-row">' + seg + '</div>' +
-    (isToday ? '' : '<button class="ghost-btn" data-act="backtoday">← Back to today</button>') +
-    '</div>' +
+    (segRow || !isToday
+      ? '<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">' + segRow +
+        (isToday ? '' : '<button class="ghost-btn" data-act="backtoday" style="margin-left: auto;">← Back to today</button>') + '</div>'
+      : '') +
     '<div style="display: flex; flex-direction: column; gap: 10px;">' + cards + '</div>' +
     '<div style="display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 12px; color: var(--color-neutral-600); padding: 0 4px;">' +
     svgArrow + '<span>Tap the circle to log a set with your last weight — tap the card for details and per-set logging.</span></div>' +
@@ -1218,11 +1238,7 @@ document.getElementById('frame').addEventListener('click', (e) => {
     }
     case 'backtoday': ui.viewDate = todayStr(); break;
     case 'daytype': {
-      const type = t.dataset.type;
-      const sess = sessionOf(date);
-      if (isWorkout(sess)) {
-        if (type !== 'rest') { sess.day = type; save(); }
-      } else { store.overrides[date] = type; save(); }
+      if (!isWorkout(sessionOf(date))) { store.overrides[date] = t.dataset.type; save(); }
       break;
     }
     case 'backfromdetail': ui.screen = 'today'; ui.detailId = null; ui.editIdx = null; break;
@@ -1550,12 +1566,23 @@ function applyImport(mode) {
     Object.assign(store.customEx, data.customEx || {});
     Object.assign(store.plans, data.plans || {});
   }
-  save();
+  normalizeSessionDays();
   ui.dialog = null; ui.importData = null;
   showToast(mode === 'replace' ? 'Backup restored' : 'Backup merged');
 }
 
 /* ───────────────────────── Boot ───────────────────────── */
+
+/* Self-heal day labels: sessions written with a wrong day type (an old app
+   version, or the coach GPT) get relabeled from their logged work. */
+function normalizeSessionDays() {
+  for (const d of Object.keys(store.sessions)) {
+    const s = store.sessions[d];
+    if (isWorkout(s)) s.day = majorityDay(s);
+  }
+  save();
+}
+normalizeSessionDays();
 
 render();
 
