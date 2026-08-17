@@ -40,10 +40,14 @@ is seeded with the 2026-08-17 pull session. Two backup paths, both under
 
 ## Coach chat
 
-The Coach tab is a real chat with Claude (`claude-opus-5`) that gets your
-program, the rotation rules, and your full workout log as context, so advice
-is grounded in your actual numbers. It calls the Anthropic API directly from
-the browser (no backend): create an API key at console.anthropic.com, paste
-it once per device in the Coach tab. The key lives only in that device's
-localStorage; chat history is stored locally too. A message costs a few
-cents. Disconnect from the Coach header at any time.
+Two ways to coach, both grounded in your program and full workout log:
+
+- **Claude subscription (recommended)** — tap **Copy coach brief** in the
+  Coach tab; it packs your setup, program, rotation state, and complete log
+  into one prompt. Paste it into a new claude.ai chat (app or web) and coach
+  there on your subscription. Copy a fresh brief when the log grows.
+- **In-app chat (API key)** — a streaming chat with `claude-opus-5` inside
+  the app, calling the Anthropic API directly from the browser (no backend).
+  Needs a pay-per-use API key from console.anthropic.com (a few cents per
+  message; subscriptions cannot be used for API calls). The key and chat
+  history live only in that device's localStorage.

@@ -809,10 +809,17 @@ function renderCoach() {
       '<div class="h-title" style="margin-top: 0;">Coach</div>' +
       '<div class="sub" style="margin: 2px 0 18px;">A real coach that knows your program and your log</div>' +
       '<div class="card-panel" style="padding: 18px;">' +
-      '<div style="font-weight: 600; font-size: 15px;">Connect Claude</div>' +
-      '<div class="sub" style="margin: 2px 0 12px;">The coach chats via the Claude API and sees your full workout log, so its advice uses your actual numbers. Paste an Anthropic API key from <b>console.anthropic.com</b> — it stays on this device, and a chat message costs a few cents.</div>' +
+      '<div style="font-weight: 600; font-size: 15px;">Chat on your Claude subscription</div>' +
+      '<div class="sub" style="margin: 2px 0 12px;">Copy the coach brief — your program, rotation, and full log packed into one prompt — then paste it into a new claude.ai chat and coach there on your subscription. Copy a fresh brief whenever your log has grown.</div>' +
+      '<div style="display: flex; gap: 8px;">' +
+      '<button class="big-btn" data-act="coachbrief" style="flex: 1.4;">Copy coach brief</button>' +
+      '<a href="https://claude.ai/new" target="_blank" rel="noopener" class="big-btn" style="flex: 1; background: transparent; color: var(--color-neutral-800); border: 1.5px solid var(--color-divider); text-decoration: none; text-align: center; line-height: 1.2; display: flex; align-items: center; justify-content: center;">Open Claude</a>' +
+      '</div></div>' +
+      '<div class="card-panel" style="padding: 18px; margin-top: 12px;">' +
+      '<div style="font-weight: 600; font-size: 13.5px;">Prefer chatting inside the app?</div>' +
+      '<div class="sub" style="margin: 2px 0 12px;">In-app chat needs an Anthropic API key from <b>console.anthropic.com</b> (pay-per-use — a few cents per message; subscriptions can’t be used here). The key stays on this device.</div>' +
       '<input class="text-input" id="inp-coachkey" type="password" placeholder="Anthropic API key (sk-ant-…)" autocomplete="off">' +
-      '<button class="big-btn" data-act="coachconnect" style="margin-top: 8px;">Connect coach</button>' +
+      '<button class="big-btn" data-act="coachconnect" style="margin-top: 8px; background: transparent; color: var(--color-neutral-800); border: 1.5px solid var(--color-divider);">Connect API key</button>' +
       '</div>' +
       '<div style="background: var(--color-surface); border-radius: var(--radius-lg); padding: 14px 16px; box-shadow: var(--shadow-sm); margin-top: 12px;">' +
       '<div style="font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; color: var(--color-accent-700); margin-bottom: 8px;">Pull day</div>' +
@@ -1202,6 +1209,11 @@ document.getElementById('frame').addEventListener('click', (e) => {
       break;
     }
     case 'coachdisconnect': coach = {}; saveCoach(); break;
+    case 'coachbrief':
+      navigator.clipboard.writeText(coachBrief())
+        .then(() => showToast('Coach brief copied — paste it into Claude'))
+        .catch(() => showToast('Copy failed — try again'));
+      return;
     case 'chatclear': chat = []; saveChat(); break;
     case 'chatsend': coachSend(); return;
     case 'importmerge': applyImport('merge'); break;
@@ -1279,6 +1291,20 @@ function coachSystemPrompt() {
     'Full workout log, oldest first (date (day): exercise reps @ weight; BW = bodyweight):\n' +
     (coachLogSummary() || 'No workouts logged yet.') + '\n\n' +
     'Be a concise, practical strength coach. Ground advice in the actual numbers from the log. Default progression: add reps until the top of the target range, then add weight (0.5–2 kg steps for dumbbells) and drop back to the bottom of the range. Use kg. Answer in plain text — no markdown headings, asterisks, or backticks; short paragraphs and simple dashes are fine. Keep answers brief unless asked for detail. For pain or possible injuries, err on the side of caution and recommend a professional for anything serious.';
+}
+
+/* A pasteable version of the coach context, for chatting on a claude.ai
+   subscription instead of an API key. */
+function coachBrief() {
+  const planTxt = ['pull', 'push'].map((t) =>
+    DAY_LABEL[t] + ': ' + PLAN[t].map((id) => EX[id].name + ' ' + EX[id].sets + '×' + EX[id].reps).join(', ')).join('\n');
+  return 'Act as my strength coach. Read my setup, program, and complete workout log below, then ask me what I need help with today. Ground all advice in my actual numbers, use kg, and keep answers concise.\n\n' +
+    'Setup: I train at home with adjustable dumbbells, a pull-up bar, and an ottoman as a bench — no barbell, no real bench, no machines.\n\n' +
+    'Program (push and pull alternate, with a rest day between when possible):\n' + planTxt + '\n\n' +
+    'Today is ' + todayStr() + ' (' + weekdayName(todayStr()) + '); my app suggests a ' + DAY_LABEL[dayType(todayStr())].toLowerCase() + '.\n\n' +
+    'Workout log, oldest first (date (day): exercise reps @ weight; BW = bodyweight):\n' +
+    (coachLogSummary() || 'No workouts logged yet.') + '\n\n' +
+    'Default progression: add reps until the top of the target range, then add weight (0.5–2 kg steps) and drop back to the bottom of the range.';
 }
 
 async function coachSend() {
