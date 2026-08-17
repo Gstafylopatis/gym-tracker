@@ -1,0 +1,30 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Gym Tracker Log",
+    "description": "Fetches the user's current workout log from their Gym Tracker app's cloud backup.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    { "url": "https://gist.githubusercontent.com" }
+  ],
+  "paths": {
+    "/Gstafylopatis/5d36fc8ab53a8689838dd8c13a63b868/raw/gym-tracker-backup.json": {
+      "get": {
+        "operationId": "getWorkoutLog",
+        "summary": "Get the user's full workout log",
+        "description": "Returns the complete gym log as JSON: sessions keyed by ISO date, each with a day type (push/pull) and per-exercise arrays of sets, where each set is {r: reps, kg: weight-or-null-for-bodyweight}.",
+        "responses": {
+          "200": {
+            "description": "The workout log",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
