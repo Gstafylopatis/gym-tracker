@@ -391,6 +391,7 @@ function seedStore() {
     },
     overrides: {}, // date -> forced day type
     customEx: {},  // extra exercise definitions (coach GPT / imports)
+    plans: {},     // date -> planned session {day, ex: [ids]} (coach GPT)
   };
 }
 
@@ -401,6 +402,7 @@ try {
 if (!store.sessions) store.sessions = {};
 if (!store.overrides) store.overrides = {};
 if (!store.customEx) store.customEx = {};
+if (!store.plans) store.plans = {};
 
 function save() { localStorage.setItem(STORE_KEY, JSON.stringify(store)); }
 save();
@@ -474,6 +476,8 @@ function dayType(date) {
   const sess = sessionOf(date);
   if (isWorkout(sess)) return sess.day;
   if (store.overrides[date]) return store.overrides[date];
+  const plan = store.plans && store.plans[date];
+  if (plan && DAY_LABEL[plan.day]) return plan.day;
   const last = lastWorkoutBefore(date);
   if (!last) return 'push';
   let lw = last, lt = store.sessions[last].day;
@@ -500,7 +504,12 @@ function dayType(date) {
    that day so recorded sets can never become invisible. */
 function dayItems(date) {
   const type = dayType(date);
-  const ids = (PLAN[type] || []).map((id) => ({ id, rolled: null }));
+  const plan = store.plans && store.plans[date];
+  // A coach-written plan supplies the day's exercise list, as long as the
+  // day type hasn't been switched away from it in the app.
+  const ids = (plan && plan.day === type && Array.isArray(plan.ex))
+    ? plan.ex.filter((id) => typeof id === 'string').map((id) => ({ id, rolled: null }))
+    : (PLAN[type] || []).map((id) => ({ id, rolled: null }));
   const last = type !== 'rest' ? lastWorkoutBefore(date) : null;
   if (last) {
     const lastType = store.sessions[last].day;
@@ -1534,11 +1543,12 @@ function applyImport(mode) {
   const data = ui.importData;
   if (!data) return;
   if (mode === 'replace') {
-    store = { version: 1, sessions: data.sessions || {}, overrides: data.overrides || {}, customEx: data.customEx || {} };
+    store = { version: 1, sessions: data.sessions || {}, overrides: data.overrides || {}, customEx: data.customEx || {}, plans: data.plans || {} };
   } else {
     Object.assign(store.sessions, data.sessions || {});
     Object.assign(store.overrides, data.overrides || {});
     Object.assign(store.customEx, data.customEx || {});
+    Object.assign(store.plans, data.plans || {});
   }
   save();
   ui.dialog = null; ui.importData = null;
