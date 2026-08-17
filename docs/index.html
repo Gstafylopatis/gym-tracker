@@ -1589,6 +1589,12 @@ render();
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
+
+// Ask the browser to protect this origin's storage from eviction under
+// disk pressure (granted automatically for installed PWAs on Chrome).
+if (navigator.storage && navigator.storage.persist) {
+  navigator.storage.persist().catch(() => {});
+}
 </script>
 </body>
 </html>
