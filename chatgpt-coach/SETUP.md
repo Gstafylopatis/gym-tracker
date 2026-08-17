@@ -28,6 +28,11 @@ gist.github.com.
 3. Name: `Gym Coach`. Description: `Strength coach that reads and logs my
    Gym Tracker workouts`.
 4. **Instructions**: paste the entire contents of `instructions.md`.
+   **Conversation starters**:
+   - What's my workout today?
+   - Done training — here's what I did, log it.
+   - At the gym today, give me my session.
+   - Today only legs and core.
 5. **Actions** → **Create new action**:
    - **Schema**: paste the entire contents of `action-openapi.json`.
    - **Authentication**: API Key → Auth Type **Bearer** → paste the GitHub
