@@ -341,10 +341,24 @@ function getEx(id) {
       if (c[k] != null) base[k] = c[k];
     }
     if (!DAY_LABEL[base.day]) base.day = 'other';
+    if (c.mus && (Array.isArray(c.mus.p) || Array.isArray(c.mus.s))) base.mus = { p: c.mus.p || [], s: c.mus.s || [] };
+    if (Array.isArray(c.how)) base.how = c.how.filter((t) => typeof t === 'string');
+    base.img0 = safeImg(c.img0);
+    base.img1 = safeImg(c.img1);
   }
   // If it was ever logged with a weight, treat it as a weighted exercise.
   if (base.kg == null && exHistory(id).some((h) => h.sets.some((s) => s.kg != null))) base.kg = 0;
   return base;
+}
+/* Image URLs from the gist are untrusted — accept only plain https URLs. */
+function safeImg(u) {
+  return (typeof u === 'string' && /^https:\/\/[^\s"'()<>\\]+$/i.test(u)) ? u : null;
+}
+/* Photo for an exercise: bundled file for built-ins, remote URL for customs. */
+function exImg(id, n) {
+  const ex = getEx(id);
+  if (!ex.custom) return 'images/' + id + '-' + n + '.jpg';
+  return ex['img' + n] || null;
 }
 /* Custom exercise ids that appear anywhere in the log. */
 function customExIds() {
@@ -654,9 +668,12 @@ function renderToday() {
     const border = done ? 'var(--color-accent)' : 'var(--color-neutral-400)';
     const bg = done ? 'var(--color-accent)' : 'transparent';
     const inner = done ? svgCheck : (sets.length ? sets.length + '/' + ex.sets : '<span style="color: var(--color-neutral-400); font-size: 20px; font-weight: 400; line-height: 1;">+</span>');
-    const thumb = ex.custom
-      ? '<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--color-neutral-400)" stroke-width="2.5" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/></svg></div>'
-      : '<div class="washed" style="background-image: url(images/' + it.id + '-0.jpg);"></div>';
+    const img0 = exImg(it.id, 0);
+    const thumb =
+      '<div style="position: relative; width: 100%; height: 100%;">' +
+      (ex.custom ? '<div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--color-neutral-400)" stroke-width="2.5" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/></svg></div>' : '') +
+      (img0 ? '<div class="washed" style="position: absolute; inset: 0; background: url(' + img0 + ') center / contain no-repeat;"></div>' : '') +
+      '</div>';
     return '<div class="ex-card" data-act="open" data-id="' + it.id + '" style="opacity: ' + (done ? 0.62 : 1) + ';">' +
       '<div class="ex-thumb">' + thumb + '</div>' +
       '<div style="flex: 1; min-width: 0;">' +
@@ -759,13 +776,14 @@ function renderDetail() {
       '<span>Last time (' + niceDate(prev.date) + '): ' + setsSummary(prev.sets) + '</span></div>'
     : '';
 
-  const photos = ex.custom ? '' :
-    '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">' +
-    [0, 1].map((n) =>
+  const shots = [0, 1].map((n) => [n, exImg(id, n)]).filter(([, u]) => u);
+  const photos = !shots.length ? '' :
+    '<div style="display: grid; grid-template-columns: ' + (shots.length === 2 ? '1fr 1fr' : '1fr') + '; gap: 10px;">' +
+    shots.map(([n, u]) =>
       '<figure style="margin: 0;">' +
-      '<div data-act="zoom" data-n="' + n + '" style="border-radius: var(--radius-md); background: #fff; border: 1px solid var(--color-divider); overflow: hidden; aspect-ratio: 5 / 4; cursor: zoom-in;">' +
-      '<div class="washed" style="width: 100%; height: 100%; background: #fff url(images/' + id + '-' + n + '.jpg) center / contain no-repeat;"></div></div>' +
-      '<figcaption style="font-size: 11px; margin-top: 4px; color: var(--color-neutral-600); text-align: center;">' + (n ? 'End' : 'Start') + ' position · tap to enlarge</figcaption></figure>').join('') +
+      '<div data-act="zoom" data-n="' + n + '" style="border-radius: var(--radius-md); background: #fff; border: 1px solid var(--color-divider); overflow: hidden; aspect-ratio: 5 / 4; cursor: zoom-in;' + (shots.length === 1 ? ' max-width: 60%; margin: 0 auto;' : '') + '">' +
+      '<div class="washed" style="width: 100%; height: 100%; background: #fff url(' + u + ') center / contain no-repeat;"></div></div>' +
+      '<figcaption style="font-size: 11px; margin-top: 4px; color: var(--color-neutral-600); text-align: center;">' + (shots.length === 2 ? (n ? 'End' : 'Start') + ' position · tap to enlarge' : 'Tap to enlarge') + '</figcaption></figure>').join('') +
     '</div>';
 
   const muscles = ex.mus ?
@@ -782,13 +800,13 @@ function renderDetail() {
     ex.how.map((t, i) =>
       '<div style="display: flex; gap: 10px; font-size: 13.5px; line-height: 1.45;">' +
       '<span style="width: 22px; height: 22px; flex: none; border-radius: 999px; background: var(--color-accent); color: var(--color-bg); font-size: 11.5px; font-weight: 700; display: flex; align-items: center; justify-content: center;">' + (i + 1) + '</span>' +
-      '<span>' + t + '</span></div>').join('') +
+      '<span>' + esc(t) + '</span></div>').join('') +
     '</div>' : '';
 
   return '<div class="screen" data-scrollkey="detail">' +
     '<button class="ghost-btn" data-act="backfromdetail" style="margin: -6px 0 8px -6px;">' + svgBack + weekdayName(date) + '</button>' +
     photos +
-    '<div style="font-family: var(--font-heading); font-size: 27px; line-height: 1.15; margin-top: ' + (ex.custom ? '4px' : '16px') + ';">' + esc(ex.name) + '</div>' +
+    '<div style="font-family: var(--font-heading); font-size: 27px; line-height: 1.15; margin-top: ' + (shots.length ? '16px' : '4px') + ';">' + esc(ex.name) + '</div>' +
     '<div style="display: flex; gap: 6px; margin-top: 8px;"><span class="pill pill-green" style="font-size: 11.5px; padding: 3px 10px;">' + esc(ex.m) + '</span>' +
     '<span class="pill" style="font-size: 11.5px; padding: 3px 10px; background: var(--color-neutral-200); color: var(--color-neutral-700);">' + DAY_LABEL[ex.day] + '</span></div>' +
     (ex.desc ? '<p style="font-size: 14px; line-height: 1.55; color: var(--color-neutral-700); margin: 12px 0 0;">' + esc(ex.desc) + '</p>' : '') +
@@ -1100,11 +1118,13 @@ function renderOverlay() {
   let html = '';
   if (ui.zoom != null && ui.detailId) {
     const ex = getEx(ui.detailId);
+    const zoomUrl = exImg(ui.detailId, ui.zoom);
+    const otherUrl = exImg(ui.detailId, ui.zoom === 0 ? 1 : 0);
     html += '<div class="zoom-wrap" data-act="zoomclose">' +
-      '<div class="washed" style="width: 100%; max-width: 360px; aspect-ratio: 5 / 4; border-radius: var(--radius-lg); background: #fff url(images/' + ui.detailId + '-' + ui.zoom + '.jpg) center / contain no-repeat; box-shadow: var(--shadow-lg);"></div>' +
-      '<div style="color: var(--color-neutral-100); font-size: 14px; font-weight: 600; text-align: center;">' + ex.name + ' — ' + (ui.zoom === 0 ? 'start' : 'end') + ' position</div>' +
+      '<div class="washed" style="width: 100%; max-width: 360px; aspect-ratio: 5 / 4; border-radius: var(--radius-lg); background: #fff url(' + zoomUrl + ') center / contain no-repeat; box-shadow: var(--shadow-lg);"></div>' +
+      '<div style="color: var(--color-neutral-100); font-size: 14px; font-weight: 600; text-align: center;">' + esc(ex.name) + (otherUrl ? ' — ' + (ui.zoom === 0 ? 'start' : 'end') + ' position' : '') + '</div>' +
       '<div style="display: flex; gap: 8px;">' +
-      '<button class="big-btn" data-act="zoomswap" style="width: auto; padding: 9px 18px;">' + (ui.zoom === 0 ? 'Show end position' : 'Show start position') + '</button>' +
+      (otherUrl ? '<button class="big-btn" data-act="zoomswap" style="width: auto; padding: 9px 18px;">' + (ui.zoom === 0 ? 'Show end position' : 'Show start position') + '</button>' : '') +
       '<button class="big-btn" data-act="zoomclose" style="width: auto; padding: 9px 18px; background: color-mix(in srgb, #fff 18%, transparent); color: var(--color-neutral-100);">Close</button>' +
       '</div></div>';
   }
