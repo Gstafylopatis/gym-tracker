@@ -2,27 +2,64 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Gym Tracker Log",
-    "description": "Fetches the user's current workout log from their Gym Tracker app's cloud backup.",
-    "version": "1.0.0"
+    "description": "Reads and updates the user's workout log, stored as gym-tracker-backup.json in a GitHub Gist.",
+    "version": "2.0.0"
   },
   "servers": [
-    { "url": "https://gist.githubusercontent.com" }
+    { "url": "https://api.github.com" }
   ],
   "paths": {
-    "/Gstafylopatis/5d36fc8ab53a8689838dd8c13a63b868/raw/gym-tracker-backup.json": {
+    "/gists/5d36fc8ab53a8689838dd8c13a63b868": {
       "get": {
         "operationId": "getWorkoutLog",
         "summary": "Get the user's full workout log",
-        "description": "Returns the complete gym log as JSON: sessions keyed by ISO date, each with a day type (push/pull) and per-exercise arrays of sets, where each set is {r: reps, kg: weight-or-null-for-bodyweight}.",
+        "description": "Returns the gist object. The log is the JSON string in files['gym-tracker-backup.json'].content: sessions keyed by ISO date, each with a day type and per-exercise arrays of sets {r: reps, kg: weight-or-null-for-bodyweight}, plus customEx definitions for non-built-in exercises.",
         "responses": {
           "200": {
-            "description": "The workout log",
+            "description": "The gist containing the workout log",
             "content": {
               "application/json": {
                 "schema": { "type": "object" }
               }
             }
           }
+        }
+      },
+      "patch": {
+        "operationId": "updateWorkoutLog",
+        "summary": "Overwrite the workout log with updated content",
+        "description": "Replaces gym-tracker-backup.json with the complete updated log JSON. Always call getWorkoutLog immediately before, modify minimally, and send back the FULL document — every existing session, override, and customEx entry must be preserved.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["files"],
+                "properties": {
+                  "files": {
+                    "type": "object",
+                    "required": ["gym-tracker-backup.json"],
+                    "properties": {
+                      "gym-tracker-backup.json": {
+                        "type": "object",
+                        "required": ["content"],
+                        "properties": {
+                          "content": {
+                            "type": "string",
+                            "description": "The complete new log as a JSON string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Log updated" }
         }
       }
     }

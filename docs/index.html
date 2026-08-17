@@ -321,7 +321,39 @@ const PLAN = {
   pull: ['pullup', 'row', 'hammer', 'conc'],
   push: ['floorpress', 'inclinepu', 'ohp', 'latraise', 'kneeraise'],
 };
-const DAY_LABEL = { pull: 'Pull day', push: 'Push day', rest: 'Rest day' };
+const DAY_LABEL = { pull: 'Pull day', push: 'Push day', rest: 'Rest day', other: 'Custom day' };
+
+/* Resolve an exercise id to a definition. Built-ins come from EX; anything
+   else (added by the coach GPT or an import) falls back to store.customEx,
+   then to a safe generic definition so unknown ids can never crash a render. */
+function prettyName(id) {
+  return id.charAt(0).toUpperCase() + id.slice(1).replace(/[-_]+/g, ' ');
+}
+function getEx(id) {
+  if (EX[id]) return EX[id];
+  const base = {
+    name: prettyName(id), day: 'other', sets: 3, reps: '', repDefault: 10,
+    kg: null, m: 'Custom', mus: null, desc: '', how: [], custom: true,
+  };
+  const c = store.customEx && store.customEx[id];
+  if (c) {
+    for (const k of ['name', 'day', 'sets', 'reps', 'repDefault', 'kg', 'm', 'desc']) {
+      if (c[k] != null) base[k] = c[k];
+    }
+    if (!DAY_LABEL[base.day]) base.day = 'other';
+  }
+  // If it was ever logged with a weight, treat it as a weighted exercise.
+  if (base.kg == null && exHistory(id).some((h) => h.sets.some((s) => s.kg != null))) base.kg = 0;
+  return base;
+}
+/* Custom exercise ids that appear anywhere in the log. */
+function customExIds() {
+  const ids = new Set(Object.keys((store.customEx) || {}));
+  for (const d of workoutDates()) for (const id of Object.keys(store.sessions[d].sets)) {
+    if (!EX[id]) ids.add(id);
+  }
+  return [...ids];
+}
 const KG_STEP = 0.5;
 const WEEK_TARGET = 3; // workouts per week the ring aims at
 
@@ -344,6 +376,7 @@ function seedStore() {
       },
     },
     overrides: {}, // date -> forced day type
+    customEx: {},  // extra exercise definitions (coach GPT / imports)
   };
 }
 
@@ -353,6 +386,7 @@ try {
 } catch (e) { store = seedStore(); }
 if (!store.sessions) store.sessions = {};
 if (!store.overrides) store.overrides = {};
+if (!store.customEx) store.customEx = {};
 
 function save() { localStorage.setItem(STORE_KEY, JSON.stringify(store)); }
 save();
@@ -415,7 +449,8 @@ function lastSetsFor(exId, beforeDate) {
 function lastKg(exId, beforeDate) {
   const prev = lastSetsFor(exId, beforeDate || '9999');
   if (prev) { for (let i = prev.sets.length - 1; i >= 0; i--) { if (prev.sets[i].kg != null) return prev.sets[i].kg; } }
-  return EX[exId].kg;
+  const kg = getEx(exId).kg;
+  return kg === 0 ? null : kg;
 }
 
 /* Day type for a date: logged session > manual override > rotation suggestion.
@@ -428,6 +463,15 @@ function dayType(date) {
   const last = lastWorkoutBefore(date);
   if (!last) return 'push';
   let lw = last, lt = store.sessions[last].day;
+  if (lt !== 'push' && lt !== 'pull') {
+    // Custom day (e.g. legs) — alternate from the most recent push/pull instead.
+    const ds = workoutDates().filter((d) => d < date);
+    for (let i = ds.length - 1; i >= 0; i--) {
+      const t = store.sessions[ds[i]].day;
+      if (t === 'push' || t === 'pull') { lt = t; break; }
+    }
+    if (lt !== 'push' && lt !== 'pull') lt = 'pull';
+  }
   let d = addDays(last, 1), guard = 0;
   while (d < date && guard++ < 90) {
     const t = store.overrides[d] || (d === addDays(lw, 1) ? 'rest' : (lt === 'pull' ? 'push' : 'pull'));
@@ -459,14 +503,14 @@ function dayItems(date) {
   }
   return ids;
 }
-function exDone(date, exId) { return setsOf(date, exId).length >= EX[exId].sets; }
+function exDone(date, exId) { return setsOf(date, exId).length >= getEx(exId).sets; }
 
 /* ───────────────────────── Mutations ───────────────────────── */
 
 function logSet(date, exId, r, kg) {
-  const sess = store.sessions[date] || (store.sessions[date] = { day: dayType(date) === 'rest' ? (EX[exId].day) : dayType(date), sets: {} });
+  const sess = store.sessions[date] || (store.sessions[date] = { day: dayType(date) === 'rest' ? getEx(exId).day : dayType(date), sets: {} });
   if (!sess.sets) sess.sets = {};
-  if (sess.day === 'rest') sess.day = EX[exId].day;
+  if (sess.day === 'rest') sess.day = getEx(exId).day;
   (sess.sets[exId] = sess.sets[exId] || []).push({ r, kg });
   save();
 }
@@ -602,21 +646,24 @@ function renderToday() {
   const kicker = (isToday ? '' : niceDate(date) + ' · ') + DAY_LABEL[type];
 
   let cards = items.map((it) => {
-    const ex = EX[it.id];
+    const ex = getEx(it.id);
     const sets = setsOf(date, it.id);
     const done = sets.length >= ex.sets;
     const kg = lastKg(it.id, date);
-    const meta = done ? setsSummary(sets) : ex.sets + ' × ' + ex.reps + ' · ' + kgLabel(ex.kg == null ? null : kg);
+    const meta = done ? setsSummary(sets) : ex.sets + ' × ' + (ex.reps || '?') + ' · ' + kgLabel(ex.kg == null ? null : kg);
     const border = done ? 'var(--color-accent)' : 'var(--color-neutral-400)';
     const bg = done ? 'var(--color-accent)' : 'transparent';
     const inner = done ? svgCheck : (sets.length ? sets.length + '/' + ex.sets : '<span style="color: var(--color-neutral-400); font-size: 20px; font-weight: 400; line-height: 1;">+</span>');
+    const thumb = ex.custom
+      ? '<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--color-neutral-400)" stroke-width="2.5" stroke-linecap="round"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/></svg></div>'
+      : '<div class="washed" style="background-image: url(images/' + it.id + '-0.jpg);"></div>';
     return '<div class="ex-card" data-act="open" data-id="' + it.id + '" style="opacity: ' + (done ? 0.62 : 1) + ';">' +
-      '<div class="ex-thumb"><div class="washed" style="background-image: url(images/' + it.id + '-0.jpg);"></div></div>' +
+      '<div class="ex-thumb">' + thumb + '</div>' +
       '<div style="flex: 1; min-width: 0;">' +
-      '<div style="font-weight: 600; font-size: 15px; line-height: 1.25;' + (done ? ' text-decoration: line-through;' : '') + '">' + ex.name + '</div>' +
+      '<div style="font-weight: 600; font-size: 15px; line-height: 1.25;' + (done ? ' text-decoration: line-through;' : '') + '">' + esc(ex.name) + '</div>' +
       '<div style="font-size: 12.5px; color: var(--color-neutral-600); margin-top: 2px;">' + meta + '</div>' +
       '<div style="display: flex; gap: 5px; margin-top: 5px; flex-wrap: wrap;">' +
-      '<span class="pill pill-green">' + ex.m + '</span>' +
+      '<span class="pill pill-green">' + esc(ex.m) + '</span>' +
       (it.rolled ? '<span class="pill pill-orange">↳ ' + it.rolled + '</span>' : '') +
       '</div></div>' +
       '<button class="set-circle" data-act="quickset" data-id="' + it.id + '" aria-label="Log a set" ' +
@@ -657,7 +704,7 @@ function renderToday() {
 
 function renderDetail() {
   const id = ui.detailId;
-  const ex = EX[id];
+  const ex = getEx(id);
   const date = ui.viewDate;
   const sets = setsOf(date, id);
   const prev = lastSetsFor(id, date);
@@ -692,7 +739,7 @@ function renderDetail() {
   const logger =
     '<div class="card-panel" style="padding: 14px 16px; margin-top: 14px;">' +
     '<div style="font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; font-weight: 600; color: var(--color-neutral-600);">' +
-    'Log · ' + (date === todayStr() ? 'today' : niceDate(date)) + ' · target ' + ex.sets + ' × ' + ex.reps + '</div>' +
+    'Log · ' + (date === todayStr() ? 'today' : niceDate(date)) + ' · target ' + ex.sets + ' × ' + (ex.reps || '?') + '</div>' +
     (loggedRows ? '<div style="margin-top: 6px;">' + loggedRows + '</div>' : '') +
     '<div style="margin-top: 10px; padding-top: 10px;' + (sets.length ? ' border-top: 1px solid var(--color-divider);' : '') + '">' +
     '<div style="font-weight: 600; font-size: 13.5px; margin-bottom: 8px;">' + editorTitle + '</div>' +
@@ -712,33 +759,41 @@ function renderDetail() {
       '<span>Last time (' + niceDate(prev.date) + '): ' + setsSummary(prev.sets) + '</span></div>'
     : '';
 
-  return '<div class="screen" data-scrollkey="detail">' +
-    '<button class="ghost-btn" data-act="backfromdetail" style="margin: -6px 0 8px -6px;">' + svgBack + weekdayName(date) + '</button>' +
+  const photos = ex.custom ? '' :
     '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">' +
     [0, 1].map((n) =>
       '<figure style="margin: 0;">' +
       '<div data-act="zoom" data-n="' + n + '" style="border-radius: var(--radius-md); background: #fff; border: 1px solid var(--color-divider); overflow: hidden; aspect-ratio: 5 / 4; cursor: zoom-in;">' +
       '<div class="washed" style="width: 100%; height: 100%; background: #fff url(images/' + id + '-' + n + '.jpg) center / contain no-repeat;"></div></div>' +
       '<figcaption style="font-size: 11px; margin-top: 4px; color: var(--color-neutral-600); text-align: center;">' + (n ? 'End' : 'Start') + ' position · tap to enlarge</figcaption></figure>').join('') +
-    '</div>' +
-    '<div style="font-family: var(--font-heading); font-size: 27px; line-height: 1.15; margin-top: 16px;">' + ex.name + '</div>' +
-    '<div style="display: flex; gap: 6px; margin-top: 8px;"><span class="pill pill-green" style="font-size: 11.5px; padding: 3px 10px;">' + ex.m + '</span>' +
-    '<span class="pill" style="font-size: 11.5px; padding: 3px 10px; background: var(--color-neutral-200); color: var(--color-neutral-700);">' + DAY_LABEL[ex.day] + '</span></div>' +
-    '<p style="font-size: 14px; line-height: 1.55; color: var(--color-neutral-700); margin: 12px 0 0;">' + ex.desc + '</p>' +
-    logger + prevNote +
+    '</div>';
+
+  const muscles = ex.mus ?
     '<div class="card-panel" style="padding: 14px 16px 12px; margin-top: 14px;">' +
     '<div style="font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; font-weight: 600; color: var(--color-neutral-600);">Muscles worked</div>' +
     '<div style="display: flex; justify-content: center; gap: 34px; margin-top: 8px;">' + musFigures(ex.mus) + '</div>' +
     '<div style="display: flex; gap: 16px; justify-content: center; margin-top: 10px;">' +
     '<span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--color-neutral-700);"><span style="width: 10px; height: 10px; border-radius: 999px; background: var(--color-accent);"></span>Primary</span>' +
     '<span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--color-neutral-700);"><span style="width: 10px; height: 10px; border-radius: 999px; background: var(--color-accent-300);"></span>Assisting</span>' +
-    '</div></div>' +
+    '</div></div>' : '';
+
+  const howTo = ex.how.length ?
     '<div style="background: var(--color-surface); border-radius: var(--radius-lg); padding: 14px 16px; display: flex; flex-direction: column; gap: 9px; margin-top: 14px;">' +
     ex.how.map((t, i) =>
       '<div style="display: flex; gap: 10px; font-size: 13.5px; line-height: 1.45;">' +
       '<span style="width: 22px; height: 22px; flex: none; border-radius: 999px; background: var(--color-accent); color: var(--color-bg); font-size: 11.5px; font-weight: 700; display: flex; align-items: center; justify-content: center;">' + (i + 1) + '</span>' +
       '<span>' + t + '</span></div>').join('') +
-    '</div>' +
+    '</div>' : '';
+
+  return '<div class="screen" data-scrollkey="detail">' +
+    '<button class="ghost-btn" data-act="backfromdetail" style="margin: -6px 0 8px -6px;">' + svgBack + weekdayName(date) + '</button>' +
+    photos +
+    '<div style="font-family: var(--font-heading); font-size: 27px; line-height: 1.15; margin-top: ' + (ex.custom ? '4px' : '16px') + ';">' + esc(ex.name) + '</div>' +
+    '<div style="display: flex; gap: 6px; margin-top: 8px;"><span class="pill pill-green" style="font-size: 11.5px; padding: 3px 10px;">' + esc(ex.m) + '</span>' +
+    '<span class="pill" style="font-size: 11.5px; padding: 3px 10px; background: var(--color-neutral-200); color: var(--color-neutral-700);">' + DAY_LABEL[ex.day] + '</span></div>' +
+    (ex.desc ? '<p style="font-size: 14px; line-height: 1.55; color: var(--color-neutral-700); margin: 12px 0 0;">' + esc(ex.desc) + '</p>' : '') +
+    logger + prevNote +
+    muscles + howTo +
     '</div>';
 }
 
@@ -879,7 +934,7 @@ function streakWeeks() {
 /* Single-series line chart of an exercise's history. Weighted exercises plot
    top-set weight; bodyweight ones plot total reps. */
 function historyChart(exId) {
-  const ex = EX[exId];
+  const ex = getEx(exId);
   const hist = exHistory(exId);
   const bw = ex.kg == null;
   const pts = hist.map((h) => ({
@@ -964,8 +1019,8 @@ function renderProgress() {
       '<div style="font-size: 10.5px; color: var(--color-neutral-600);' + (w.now ? ' font-weight: 700;' : '') + '">' + (w.now ? 'now' : niceDate(w.m)) + '</div></div>';
   }).join('');
 
-  const chips = [...PLAN.pull, ...PLAN.push].map((id) =>
-    '<button class="chip' + (ui.chartEx === id ? ' on' : '') + '" data-act="chartex" data-id="' + id + '">' + EX[id].name + '</button>').join('');
+  const chips = [...PLAN.pull, ...PLAN.push, ...customExIds()].map((id) =>
+    '<button class="chip' + (ui.chartEx === id ? ' on' : '') + '" data-act="chartex" data-id="' + id + '">' + esc(getEx(id).name) + '</button>').join('');
 
   const hist = exHistory(ui.chartEx).slice(-8).reverse();
   const recent = hist.map((h) =>
@@ -1044,7 +1099,7 @@ function renderNav() {
 function renderOverlay() {
   let html = '';
   if (ui.zoom != null && ui.detailId) {
-    const ex = EX[ui.detailId];
+    const ex = getEx(ui.detailId);
     html += '<div class="zoom-wrap" data-act="zoomclose">' +
       '<div class="washed" style="width: 100%; max-width: 360px; aspect-ratio: 5 / 4; border-radius: var(--radius-lg); background: #fff url(images/' + ui.detailId + '-' + ui.zoom + '.jpg) center / contain no-repeat; box-shadow: var(--shadow-lg);"></div>' +
       '<div style="color: var(--color-neutral-100); font-size: 14px; font-weight: 600; text-align: center;">' + ex.name + ' — ' + (ui.zoom === 0 ? 'start' : 'end') + ' position</div>' +
@@ -1095,7 +1150,7 @@ function readNum(id, fallback) {
 }
 
 function currentEditorValues(exId) {
-  const ex = EX[exId];
+  const ex = getEx(exId);
   const r = Math.round(readNum('inp-reps', ex.repDefault));
   const kg = ex.kg == null ? null : readNum('inp-kg', lastKg(exId, ui.viewDate));
   return { r: Math.max(1, r), kg };
@@ -1121,7 +1176,7 @@ document.getElementById('frame').addEventListener('click', (e) => {
       break;
     case 'quickset': {
       e.stopPropagation();
-      const id = t.dataset.id, ex = EX[id];
+      const id = t.dataset.id, ex = getEx(id);
       const sets = setsOf(date, id);
       if (sets.length >= ex.sets) { ui.detailId = id; ui.screen = 'detail'; ui.editIdx = null; scrollPos.detail = 0; break; }
       const prev = lastSetsFor(id, date);
@@ -1272,7 +1327,7 @@ function coachLogSummary() {
   return workoutDates().slice(-60).map((d) => {
     const s = store.sessions[d];
     const parts = Object.entries(s.sets).map(([id, sets]) => {
-      const name = EX[id] ? EX[id].name : id;
+      const name = getEx(id).name;
       const reps = sets.map((x) => x.r).join('/');
       const kgs = [...new Set(sets.map((x) => x.kg))];
       const kgPart = kgs.length === 1 ? (kgs[0] == null ? 'BW' : kgs[0] + 'kg') : sets.map((x) => (x.kg == null ? 'BW' : x.kg)).join('/') + 'kg';
@@ -1459,10 +1514,11 @@ function applyImport(mode) {
   const data = ui.importData;
   if (!data) return;
   if (mode === 'replace') {
-    store = { version: 1, sessions: data.sessions || {}, overrides: data.overrides || {} };
+    store = { version: 1, sessions: data.sessions || {}, overrides: data.overrides || {}, customEx: data.customEx || {} };
   } else {
     Object.assign(store.sessions, data.sessions || {});
     Object.assign(store.overrides, data.overrides || {});
+    Object.assign(store.customEx, data.customEx || {});
   }
   save();
   ui.dialog = null; ui.importData = null;
