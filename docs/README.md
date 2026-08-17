@@ -37,3 +37,13 @@ is seeded with the 2026-08-17 pull session. Two backup paths, both under
   device where you paste the same token. The token is stored only in that
   device's localStorage. Restore offers merge (file wins on overlapping
   dates) or full replace.
+
+## Coach chat
+
+The Coach tab is a real chat with Claude (`claude-opus-5`) that gets your
+program, the rotation rules, and your full workout log as context, so advice
+is grounded in your actual numbers. It calls the Anthropic API directly from
+the browser (no backend): create an API key at console.anthropic.com, paste
+it once per device in the Coach tab. The key lives only in that device's
+localStorage; chat history is stored locally too. A message costs a few
+cents. Disconnect from the Coach header at any time.

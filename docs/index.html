@@ -363,6 +363,17 @@ let cloud;
 try { cloud = JSON.parse(localStorage.getItem(CLOUD_KEY)) || {}; } catch (e) { cloud = {}; }
 function saveCloud() { localStorage.setItem(CLOUD_KEY, JSON.stringify(cloud)); }
 
+/* Coach chat settings (Anthropic API). Key stays on this device only. */
+const COACH_KEY = 'gym-tracker-coach';
+const CHAT_KEY = 'gym-tracker-chat';
+const COACH_MODEL = 'claude-opus-5';
+let coach, chat;
+try { coach = JSON.parse(localStorage.getItem(COACH_KEY)) || {}; } catch (e) { coach = {}; }
+try { chat = JSON.parse(localStorage.getItem(CHAT_KEY)) || []; } catch (e) { chat = []; }
+if (!Array.isArray(chat)) chat = [];
+function saveCoach() { localStorage.setItem(COACH_KEY, JSON.stringify(coach)); }
+function saveChat() { localStorage.setItem(CHAT_KEY, JSON.stringify(chat)); }
+
 /* ───────────────────────── Date helpers (local time) ───────────────────────── */
 
 function fmtDate(d) {
@@ -487,6 +498,7 @@ const ui = {
   toast: null,            // { text, undo }
   dialog: null,           // 'import' with pending data
   importData: null,
+  coachBusy: false,       // a coach reply is streaming
 };
 let toastTimer = null;
 const scrollPos = {};
@@ -790,25 +802,55 @@ function renderWeek() {
 }
 
 function renderCoach() {
-  const pullList = PLAN.pull.map((id) => '<div style="display: flex; justify-content: space-between;"><span style="font-weight: 600;">' + EX[id].name + '</span><span class="muted">' + EX[id].sets + ' × ' + EX[id].reps + '</span></div>').join('');
-  const pushList = PLAN.push.map((id) => '<div style="display: flex; justify-content: space-between;"><span style="font-weight: 600;">' + EX[id].name + '</span><span class="muted">' + EX[id].sets + ' × ' + EX[id].reps + '</span></div>').join('');
-  return '<div class="screen" data-scrollkey="coach" style="display: flex; flex-direction: column;">' +
+  if (!coach.key) {
+    const pullList = PLAN.pull.map((id) => '<div style="display: flex; justify-content: space-between;"><span style="font-weight: 600;">' + EX[id].name + '</span><span class="muted">' + EX[id].sets + ' × ' + EX[id].reps + '</span></div>').join('');
+    const pushList = PLAN.push.map((id) => '<div style="display: flex; justify-content: space-between;"><span style="font-weight: 600;">' + EX[id].name + '</span><span class="muted">' + EX[id].sets + ' × ' + EX[id].reps + '</span></div>').join('');
+    return '<div class="screen" data-scrollkey="coach">' +
+      '<div class="h-title" style="margin-top: 0;">Coach</div>' +
+      '<div class="sub" style="margin: 2px 0 18px;">A real coach that knows your program and your log</div>' +
+      '<div class="card-panel" style="padding: 18px;">' +
+      '<div style="font-weight: 600; font-size: 15px;">Connect Claude</div>' +
+      '<div class="sub" style="margin: 2px 0 12px;">The coach chats via the Claude API and sees your full workout log, so its advice uses your actual numbers. Paste an Anthropic API key from <b>console.anthropic.com</b> — it stays on this device, and a chat message costs a few cents.</div>' +
+      '<input class="text-input" id="inp-coachkey" type="password" placeholder="Anthropic API key (sk-ant-…)" autocomplete="off">' +
+      '<button class="big-btn" data-act="coachconnect" style="margin-top: 8px;">Connect coach</button>' +
+      '</div>' +
+      '<div style="background: var(--color-surface); border-radius: var(--radius-lg); padding: 14px 16px; box-shadow: var(--shadow-sm); margin-top: 12px;">' +
+      '<div style="font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; color: var(--color-accent-700); margin-bottom: 8px;">Pull day</div>' +
+      '<div style="display: flex; flex-direction: column; gap: 7px; font-size: 13.5px;">' + pullList + '</div>' +
+      '<div style="font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; color: var(--color-accent-700); margin: 14px 0 8px;">Push day</div>' +
+      '<div style="display: flex; flex-direction: column; gap: 7px; font-size: 13.5px;">' + pushList + '</div>' +
+      '</div></div>';
+  }
+
+  const bubbles = chat.map((m) =>
+    m.role === 'user'
+      ? '<div style="align-self: flex-end; max-width: 82%; background: var(--color-accent); color: var(--color-bg); padding: 10px 14px; border-radius: 18px 18px 4px 18px; font-size: 14px; line-height: 1.45; white-space: pre-wrap;">' + esc(m.text) + '</div>'
+      : '<div style="align-self: flex-start; max-width: 88%; background: var(--color-neutral-100); border: 1px solid var(--color-divider); padding: 10px 14px; border-radius: 18px 18px 18px 4px; font-size: 14px; line-height: 1.45; white-space: pre-wrap;' + (m.err ? ' color: var(--color-accent-800);' : '') + '">' + esc(m.text) + '</div>').join('');
+
+  const streaming = ui.coachBusy
+    ? '<div id="coach-stream" style="align-self: flex-start; max-width: 88%; background: var(--color-neutral-100); border: 1px solid var(--color-divider); padding: 10px 14px; border-radius: 18px 18px 18px 4px; font-size: 14px; line-height: 1.45; white-space: pre-wrap; color: var(--color-neutral-600);">…</div>'
+    : '';
+
+  const empty = !chat.length && !ui.coachBusy
+    ? '<div class="sub" style="text-align: center; margin: auto 20px;">Ask about progression, swapping exercises, soreness, or what to focus on today — the coach can see your whole log.</div>'
+    : '';
+
+  return '<div class="screen" data-scrollkey="coach" style="display: flex; flex-direction: column; overflow: hidden; padding-bottom: 92px;">' +
+    '<div style="display: flex; align-items: center; justify-content: space-between; flex: none;">' +
     '<div class="h-title" style="margin-top: 0;">Coach</div>' +
-    '<div class="sub" style="margin: 2px 0 18px;">Your current program</div>' +
-    '<div style="display: flex; flex-direction: column; gap: 12px;">' +
-    '<div style="align-self: flex-end; max-width: 78%; background: var(--color-accent); color: var(--color-bg); padding: 10px 14px; border-radius: 18px 18px 4px 18px; font-size: 14px; line-height: 1.45;">Home setup only — dumbbells, a pull-up bar and the ottoman. Keep me progressing.</div>' +
-    '<div style="align-self: flex-start; max-width: 85%; background: var(--color-neutral-100); border: 1px solid var(--color-divider); padding: 10px 14px; border-radius: 18px 18px 18px 4px; font-size: 14px; line-height: 1.45;">Here’s the split: alternate push and pull with a rest day between when you can. Add reps first; when you hit the top of a range, add weight.</div>' +
-    '<div style="align-self: flex-start; width: 92%; background: var(--color-surface); border-radius: var(--radius-lg); padding: 14px 16px; box-shadow: var(--shadow-sm);">' +
-    '<div style="font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; color: var(--color-accent-700); margin-bottom: 8px;">Pull day</div>' +
-    '<div style="display: flex; flex-direction: column; gap: 7px; font-size: 13.5px;">' + pullList + '</div>' +
-    '<div style="font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; color: var(--color-accent-700); margin: 14px 0 8px;">Push day</div>' +
-    '<div style="display: flex; flex-direction: column; gap: 7px; font-size: 13.5px;">' + pushList + '</div>' +
+    '<div style="display: flex; gap: 2px;">' +
+    (chat.length ? '<button class="ghost-btn" data-act="chatclear" style="font-size: 12px; color: var(--color-neutral-600);">Clear</button>' : '') +
+    '<button class="ghost-btn" data-act="coachdisconnect" style="font-size: 12px; color: var(--color-neutral-600);">Disconnect</button>' +
     '</div></div>' +
-    '<div style="margin-top: auto; padding-top: 16px; display: flex; gap: 8px; align-items: center; opacity: 0.55;">' +
-    '<div style="flex: 1; background: var(--color-neutral-100); border: 1px solid var(--color-divider); border-radius: 999px; padding: 11px 16px; font-size: 14px; color: var(--color-neutral-500);">Chat coming later…</div>' +
-    '<div style="width: 42px; height: 42px; flex: none; border-radius: 999px; background: var(--color-accent); display: flex; align-items: center; justify-content: center;">' +
-    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-bg)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg></div>' +
-    '</div></div>';
+    '<div id="chat-scroll" style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 10px 2px;">' +
+    empty + bubbles + streaming +
+    '</div>' +
+    '<div style="flex: none; padding-top: 10px; display: flex; gap: 8px; align-items: center;">' +
+    '<input class="text-input" id="inp-chat" type="text" placeholder="Message your coach…" autocomplete="off" style="flex: 1;"' + (ui.coachBusy ? ' disabled' : '') + '>' +
+    '<button data-act="chatsend" aria-label="Send" ' + (ui.coachBusy ? 'disabled ' : '') +
+    'style="width: 44px; height: 44px; flex: none; border-radius: 999px; border: none; cursor: pointer; background: var(--color-accent); display: flex; align-items: center; justify-content: center; opacity: ' + (ui.coachBusy ? 0.5 : 1) + ';">' +
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-bg)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>' +
+    '</button></div></div>';
 }
 
 /* — Progress helpers — */
@@ -1030,6 +1072,8 @@ function render() {
   app.innerHTML = html;
   const scr = app.querySelector('[data-scrollkey]');
   if (scr && scrollPos[scr.dataset.scrollkey]) scr.scrollTop = scrollPos[scr.dataset.scrollkey];
+  const chatScroll = document.getElementById('chat-scroll');
+  if (chatScroll) chatScroll.scrollTop = chatScroll.scrollHeight;
   renderNav();
   renderOverlay();
 }
@@ -1150,6 +1194,16 @@ document.getElementById('frame').addEventListener('click', (e) => {
     case 'cloudsave': cloudSave(); return;
     case 'cloudrestore': cloudRestore(); return;
     case 'clouddisconnect': cloud = {}; saveCloud(); break;
+    case 'coachconnect': {
+      const inp = document.getElementById('inp-coachkey');
+      const key = inp && inp.value.trim();
+      if (!key) { showToast('Paste an API key first'); return; }
+      coach.key = key; saveCoach();
+      break;
+    }
+    case 'coachdisconnect': coach = {}; saveCoach(); break;
+    case 'chatclear': chat = []; saveChat(); break;
+    case 'chatsend': coachSend(); return;
     case 'importmerge': applyImport('merge'); break;
     case 'importreplace': applyImport('replace'); break;
     case 'dialogclose': ui.dialog = null; ui.importData = null; break;
@@ -1159,6 +1213,13 @@ document.getElementById('frame').addEventListener('click', (e) => {
       break;
   }
   render();
+});
+
+document.getElementById('frame').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target && e.target.id === 'inp-chat') {
+    e.preventDefault();
+    coachSend();
+  }
 });
 
 /* ───────────────────────── Export / import ───────────────────────── */
@@ -1192,6 +1253,109 @@ document.getElementById('importFile').addEventListener('change', (e) => {
   };
   reader.readAsText(file);
 });
+
+/* — Coach chat: direct browser calls to the Claude API, streaming — */
+
+function coachLogSummary() {
+  return workoutDates().slice(-60).map((d) => {
+    const s = store.sessions[d];
+    const parts = Object.entries(s.sets).map(([id, sets]) => {
+      const name = EX[id] ? EX[id].name : id;
+      const reps = sets.map((x) => x.r).join('/');
+      const kgs = [...new Set(sets.map((x) => x.kg))];
+      const kgPart = kgs.length === 1 ? (kgs[0] == null ? 'BW' : kgs[0] + 'kg') : sets.map((x) => (x.kg == null ? 'BW' : x.kg)).join('/') + 'kg';
+      return name + ' ' + reps + ' @ ' + kgPart;
+    });
+    return d + ' (' + s.day + '): ' + parts.join('; ');
+  }).join('\n');
+}
+
+function coachSystemPrompt() {
+  const planTxt = ['pull', 'push'].map((t) =>
+    DAY_LABEL[t] + ': ' + PLAN[t].map((id) => EX[id].name + ' ' + EX[id].sets + '×' + EX[id].reps).join(', ')).join('\n');
+  return 'You are the coach inside a personal gym-tracker app. The user trains at home with adjustable dumbbells, a pull-up bar, and an ottoman used as a bench — no barbell, no real bench, no machines.\n\n' +
+    'Their program (push and pull alternate, with a rest day between when possible):\n' + planTxt + '\n\n' +
+    'Today is ' + todayStr() + ' (' + weekdayName(todayStr()) + '); the app suggests a ' + DAY_LABEL[dayType(todayStr())].toLowerCase() + '.\n\n' +
+    'Full workout log, oldest first (date (day): exercise reps @ weight; BW = bodyweight):\n' +
+    (coachLogSummary() || 'No workouts logged yet.') + '\n\n' +
+    'Be a concise, practical strength coach. Ground advice in the actual numbers from the log. Default progression: add reps until the top of the target range, then add weight (0.5–2 kg steps for dumbbells) and drop back to the bottom of the range. Use kg. Answer in plain text — no markdown headings, asterisks, or backticks; short paragraphs and simple dashes are fine. Keep answers brief unless asked for detail. For pain or possible injuries, err on the side of caution and recommend a professional for anything serious.';
+}
+
+async function coachSend() {
+  const inp = document.getElementById('inp-chat');
+  const text = inp && inp.value.trim();
+  if (!text || ui.coachBusy || !coach.key) return;
+  chat.push({ role: 'user', text });
+  saveChat();
+  ui.coachBusy = true;
+  render();
+
+  const messages = chat.filter((m) => !m.err).map((m) => ({ role: m.role, content: m.text }));
+  let reply = '', stopReason = null, errText = null;
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': coach.key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: COACH_MODEL,
+        max_tokens: 1024,
+        stream: true,
+        output_config: { effort: 'low' },
+        system: [{ type: 'text', text: coachSystemPrompt(), cache_control: { type: 'ephemeral' } }],
+        messages,
+      }),
+    });
+    if (!res.ok) {
+      let detail = '';
+      try { detail = (await res.json()).error.message; } catch (e) { /* no body */ }
+      throw new Error(res.status === 401 ? 'API key rejected — disconnect and paste a fresh key' : (detail || 'HTTP ' + res.status));
+    }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line.startsWith('data:')) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(5)); } catch (e) { continue; }
+        if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') {
+          reply += ev.delta.text;
+          const el = document.getElementById('coach-stream');
+          if (el) {
+            el.textContent = reply;
+            el.style.color = 'var(--color-text)';
+            const sc = document.getElementById('chat-scroll');
+            if (sc) sc.scrollTop = sc.scrollHeight;
+          }
+        } else if (ev.type === 'message_delta' && ev.delta && ev.delta.stop_reason) {
+          stopReason = ev.delta.stop_reason;
+        } else if (ev.type === 'error') {
+          errText = (ev.error && ev.error.message) || 'stream error';
+        }
+      }
+    }
+  } catch (e) {
+    errText = e.message || 'network error';
+  }
+  ui.coachBusy = false;
+  if (reply) chat.push({ role: 'assistant', text: reply + (stopReason === 'max_tokens' ? ' […]' : '') });
+  else if (errText) chat.push({ role: 'assistant', text: '⚠ ' + errText, err: true });
+  else if (stopReason === 'refusal') chat.push({ role: 'assistant', text: 'I can’t help with that one — try rephrasing.', err: true });
+  else chat.push({ role: 'assistant', text: '⚠ Empty response — try again.', err: true });
+  saveChat();
+  render();
+}
 
 /* — Cloud backup: a private GitHub Gist holding gym-tracker-backup.json — */
 
