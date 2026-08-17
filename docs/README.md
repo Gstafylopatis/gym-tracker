@@ -30,13 +30,13 @@ is seeded with the 2026-08-17 pull session. Two backup paths, both under
 **Progress → Backup**:
 
 - **Export / Import JSON** — plain file download/upload for manual moves.
-- **Cloud backup (GitHub Gist)** — paste a GitHub fine-grained personal
-  access token with only the *gist* scope (github.com → Settings →
-  Developer settings → Personal access tokens); the app saves the log to a
-  private gist named `gym-tracker-backup.json` and can restore it on any
-  device where you paste the same token. The token is stored only in that
-  device's localStorage. Restore offers merge (file wins on overlapping
-  dates) or full replace.
+- **Cloud backup (GitHub Gist)** — paste a GitHub **classic** personal
+  access token with only the *gist* scope (github.com/settings/tokens →
+  "Generate new token (classic)"; fine-grained tokens cannot access gists).
+  The app saves the log to a private gist named `gym-tracker-backup.json`
+  and can restore it on any device where you paste the same token. The
+  token is stored only in that device's localStorage. Restore offers merge
+  (file wins on overlapping dates) or full replace.
 
 ## Coach chat
 
@@ -51,3 +51,6 @@ Two ways to coach, both grounded in your program and full workout log:
   Needs a pay-per-use API key from console.anthropic.com (a few cents per
   message; subscriptions cannot be used for API calls). The key and chat
   history live only in that device's localStorage.
+
+There is also a ChatGPT-subscription coach that reads AND writes the log
+through the gist — see `../chatgpt-coach/SETUP.md`.
