@@ -147,6 +147,9 @@ button { cursor: pointer; }
 }
 .seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); }
 .seg.full { display: flex; }
+.seg-scroll { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.seg-scroll::-webkit-scrollbar { display: none; }
+.seg-scroll button { flex: none; white-space: nowrap; }
 .seg.full button { flex: 1; }
 
 .chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 6px; scrollbar-width: none; margin: 0 -16px; padding-left: 16px; padding-right: 16px; }

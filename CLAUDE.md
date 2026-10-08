@@ -36,8 +36,18 @@ change the app and to get coaching. Read `README.md` for the architecture.
 
 ## Program and progression
 
-- **Program:** push and pull days alternate, with a rest day between when
-  possible. The app works out the rotation from the last workout.
+- **Program:** a repeating weekly gym program, stored in `schedule` in
+  `log.json`:
+  - Monday is Day 1 (chest, back & arms), Tuesday is Day 2 (legs).
+  - Thursday is Day 4 (shoulders, chest, back & triceps), Friday is Day 5 (legs).
+  - Wednesday, Saturday and Sunday are rest days.
+
+  In the app, the user can switch any day that has nothing logged yet to
+  another program day. Without `schedule`, the app falls back to the old home
+  push/pull rotation.
+- **Starting values:** each exercise's first set starts from the same set last
+  time. Each later set starts from the set just logged. Edit `schedule` to
+  change the program, not dated plans.
 - **Progression:** add reps until every set reaches the top of the range, then
   add weight (0.5–2 kg on dumbbells) and go back to the bottom of the range.
   For bodyweight exercises, add total reps, then move to a harder variation.
@@ -51,6 +61,7 @@ change the app and to get coaching. Read `README.md` for the architecture.
     "2026-10-08": {
       "day": "push",                  // push | pull | other
       "sets": { "floorpress": [{ "r": 10, "kg": 20 }, { "r": 9, "kg": 20 }] },
+      "tpl": "d1",                    // schedule day it was logged as (set by the app)
       "note": "optional"
     }
   },
@@ -75,8 +86,12 @@ change the app and to get coaching. Read `README.md` for the architecture.
       "img1": "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/Goblet_Squat/1.jpg"
     }
   },
-  "program": { "push": ["floorpress", "..."], "pull": ["pullup", "..."] },  // optional
-  "overrides": { "2026-10-09": "rest" },   // day type the user forced in the app
+  "schedule": {                       // repeating week; takes over from the push/pull rotation
+    "days": { "d1": { "name": "Day 1", "title": "Chest, back & arms", "ex": ["mchest", "incdb"] } },
+    "week": ["d1", "d2", null, "d4", "d5", null, null]   // Monday first; null = rest
+  },
+  "program": { "push": ["floorpress", "..."], "pull": ["pullup", "..."] },  // optional, home rotation
+  "overrides": { "2026-10-09": "rest" },   // day the user switched to: push|pull|rest or a schedule day key
   "body": { "2026-10-08": 80.4 }           // bodyweight in kg
 }
 ```
@@ -93,7 +108,11 @@ change the app and to get coaching. Read `README.md` for the architecture.
 - Built-in exercise ids are in `docs/js/program.js`:
   - pull: `pullup`, `row`, `hammer`, `conc`
   - push: `floorpress`, `inclinepu`, `ohp`, `latraise`, `kneeraise`
-- To change the default program, set `program` in `log.json`. This takes
+- Dated `plans` override the schedule for one date only. Use them for
+  one-off sessions.
+- The app keeps top-level keys it does not know, so older app versions never
+  drop newer data.
+- To change the default home rotation, set `program` in `log.json`. This takes
   effect with no deploy. Change `program.js` only to change the built-in
   defaults.
 

@@ -8,8 +8,12 @@ or pay for. Your log syncs through a JSON file in a private GitHub repo.
 
 ## Features
 
-- **Today:** the day's push, pull, or custom session. Tap **+** to log a set
-  with your last numbers, or tap the card to log each set yourself. Exercises
+- **Weekly program:** a repeating week (Day 1, Day 2, rest, Day 4, Day 5,
+  rest, rest), stored in the data file. You can switch any day that has
+  nothing logged yet to another program day.
+- **Today:** the day's session. Tap **+** to log a set
+  with your last numbers (set 1 starts from last time, later sets from the set
+  you just logged), or tap the card to log each set yourself. Exercises
   you missed last time roll over to the next session.
 - **Rest timer:** starts after each set, using each exercise's rest time.
   You can add or remove 15 s. It beeps and vibrates when rest is over, keeps
