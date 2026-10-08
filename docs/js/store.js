@@ -85,7 +85,7 @@ export function getEx(id) {
   };
   const c = store.customEx && store.customEx[id];
   if (c && typeof c === 'object') {
-    for (const k of ['name', 'day', 'sets', 'reps', 'repDefault', 'kg', 'm', 'desc', 'rest', 'perArm']) {
+    for (const k of ['name', 'day', 'sets', 'reps', 'repDefault', 'kg', 'm', 'desc', 'rest', 'perArm', 'step']) {
       if (c[k] !== undefined) base[k] = c[k];
     }
     if (c.mus && (Array.isArray(c.mus.p) || Array.isArray(c.mus.s))) base.mus = { p: c.mus.p || [], s: c.mus.s || [] };
@@ -95,6 +95,8 @@ export function getEx(id) {
   }
   if (!DAY_LABEL[base.day]) base.day = 'other';
   if (typeof base.sets !== 'number' || base.sets < 1) base.sets = 3;
+  // Custom exercises without an explicit default start at the bottom of their rep range.
+  if (!builtin && !(c && typeof c.repDefault === 'number')) base.repDefault = parseInt(base.reps, 10) || 10;
   if (typeof base.repDefault !== 'number') base.repDefault = parseInt(base.reps, 10) || 10;
   // Logged with a weight at least once → weighted exercise.
   if (base.kg == null && exHistory(id).some((h) => h.sets.some((s) => s.kg != null))) base.kg = 0;

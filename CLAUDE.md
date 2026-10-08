@@ -66,6 +66,7 @@ change the app and to get coaching. Read `README.md` for the architecture.
     "gobletsquat": {
       "name": "Goblet Squat", "day": "other", "sets": 3, "reps": "10–12", "kg": 16,
       "rest": 120,                    // rest timer, in seconds
+      "step": 2.5,                    // optional; weight ± step (default scales with the load)
       "m": "Quads · glutes",          // short muscle label
       "mus": { "p": ["quads", "glutes"], "s": ["core"] },
       "desc": "One-line description",
