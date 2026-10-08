@@ -1,31 +1,23 @@
-/* Gym Tracker service worker — precaches the whole app for offline use.
-   Bump CACHE when any asset changes so clients pick up the new version. */
-const CACHE = 'gym-tracker-v1';
+/* Gym Tracker service worker — offline support.
+   App code (HTML/JS/CSS/manifest) is network-first so pushes to the repo show
+   up on the next launch; images, fonts and icons are cache-first.
+   Bump CACHE when images, fonts or icons change. */
+const CACHE = 'gym-tracker-v2';
 
-const ASSETS = [
-  '.',
-  'index.html',
-  'manifest.json',
-  'icons/icon-192.png',
-  'icons/icon-512.png',
-  'icons/icon-maskable-512.png',
-  'fonts/caprasimo-latin.woff2',
-  'fonts/caprasimo-latin-ext.woff2',
-  'fonts/figtree-latin.woff2',
-  'fonts/figtree-latin-ext.woff2',
-  'images/pullup-0.jpg', 'images/pullup-1.jpg',
-  'images/row-0.jpg', 'images/row-1.jpg',
-  'images/hammer-0.jpg', 'images/hammer-1.jpg',
-  'images/conc-0.jpg', 'images/conc-1.jpg',
-  'images/floorpress-0.jpg', 'images/floorpress-1.jpg',
-  'images/inclinepu-0.jpg', 'images/inclinepu-1.jpg',
-  'images/ohp-0.jpg', 'images/ohp-1.jpg',
-  'images/latraise-0.jpg', 'images/latraise-1.jpg',
-  'images/kneeraise-0.jpg', 'images/kneeraise-1.jpg',
+const CODE = [
+  './', 'index.html', 'manifest.json', 'css/app.css',
+  'js/app.js', 'js/views.js', 'js/store.js', 'js/sync.js', 'js/stats.js', 'js/charts.js',
+  'js/timer.js', 'js/prefs.js', 'js/program.js', 'js/dates.js', 'js/icons.js', 'js/ui.js',
+];
+const MEDIA = [
+  'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png',
+  'fonts/figtree-latin.woff2', 'fonts/figtree-latin-ext.woff2',
+  ...['pullup', 'row', 'hammer', 'conc', 'floorpress', 'inclinepu', 'ohp', 'latraise', 'kneeraise']
+    .flatMap((id) => ['images/' + id + '-0.jpg', 'images/' + id + '-1.jpg']),
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll([...CODE, ...MEDIA])).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -36,35 +28,49 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+function isMedia(url) { return /\/(images|fonts|icons)\//.test(url.pathname); }
+
+/* Network-first with a short timeout, so a slow gym connection falls back
+   to the cached copy quickly. */
+function networkFirst(req) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const fallback = () => caches.match(req, { ignoreSearch: true })
+      .then((hit) => hit || (req.mode === 'navigate' ? caches.match('index.html') : null));
+    const timer = setTimeout(() => {
+      fallback().then((hit) => { if (hit && !settled) { settled = true; resolve(hit); } });
+    }, 3000);
+    fetch(req).then((res) => {
+      clearTimeout(timer);
+      if (res.ok) {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req.mode === 'navigate' ? 'index.html' : req, copy));
+      }
+      if (!settled) { settled = true; resolve(res); }
+    }).catch(() => {
+      clearTimeout(timer);
+      fallback().then((hit) => { if (!settled) { settled = true; resolve(hit || Response.error()); } });
+    });
+  });
+}
+
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
-  if (url.origin !== location.origin) return;
+  if (url.origin !== location.origin) return; // GitHub API, remote photos: straight to network
 
-  // Navigations go network-first so app updates arrive without a manual
-  // cache bump; the cached shell is the offline fallback.
-  if (e.request.mode === 'navigate') {
-    e.respondWith(
-      fetch(e.request).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put('index.html', copy));
-        return res;
-      }).catch(() => caches.match('index.html'))
-    );
+  if (isMedia(url)) {
+    e.respondWith(caches.match(e.request, { ignoreSearch: true }).then((hit) => hit || fetch(e.request).then((res) => {
+      if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
+      return res;
+    })));
     return;
   }
+  e.respondWith(networkFirst(e.request));
+});
 
-  // Static assets: cache-first with network fill.
-  e.respondWith(
-    caches.match(e.request, { ignoreSearch: true }).then((hit) => {
-      if (hit) return hit;
-      return fetch(e.request).then((res) => {
-        if (res.ok) {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, copy));
-        }
-        return res;
-      });
-    })
-  );
+// Tapping the rest-timer notification brings the app back.
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window' }).then((cs) => (cs[0] ? cs[0].focus() : self.clients.openWindow('./'))));
 });
