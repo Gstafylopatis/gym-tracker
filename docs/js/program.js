@@ -94,5 +94,4 @@ export const MUSCLE_LABEL = {
   glutes: 'Glutes', quads: 'Quads', hams: 'Hamstrings', calves: 'Calves',
 };
 
-export const KG_STEP = 0.5;
 export const WEEK_TARGET = 3; // workouts per week the progress ring aims at

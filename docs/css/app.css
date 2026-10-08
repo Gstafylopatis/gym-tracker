@@ -233,7 +233,10 @@ button { cursor: pointer; }
 .set-no.pr { background: var(--accent); color: var(--accent-ink); }
 .set-txt { flex: 1; background: none; border: none; text-align: left; padding: 6px 0; font-size: 15px; }
 .steppers { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 12px; }
-.stepper { background: var(--surface-2); border-radius: var(--radius); padding: 8px; display: flex; align-items: center; gap: 8px; }
+.stepper { background: var(--surface-2); border-radius: var(--radius); padding: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.jumps { width: 100%; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.jumps button { height: 42px; border: none; border-radius: 999px; background: var(--surface); font-weight: 800; font-size: 14.5px; color: var(--text-2); font-variant-numeric: tabular-nums; touch-action: manipulation; }
+.jumps button:active { background: var(--surface-3); color: var(--text); }
 .stepper-label { width: 64px; flex: none; padding-left: 8px; font-size: 12px; font-weight: 700; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.05em; line-height: 1.2; }
 .stepper-ctl { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 4px; }
 .stepper-ctl button {
@@ -241,6 +244,7 @@ button { cursor: pointer; }
   font-size: 24px; font-weight: 500; display: flex; align-items: center; justify-content: center; color: var(--text);
 }
 .stepper-ctl button:active { background: var(--surface-3); }
+.stepper-ctl button { touch-action: manipulation; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .stepper-ctl input {
   width: 100%; min-width: 0; text-align: center; font-size: 30px; font-weight: 800; border: none; background: transparent;
   padding: 0; font-variant-numeric: tabular-nums; -moz-appearance: textfield; appearance: textfield; letter-spacing: -0.02em;

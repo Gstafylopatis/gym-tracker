@@ -124,12 +124,10 @@ const actions = {
   pickex: (t) => { ui.sheet = null; ui.detailId = t.dataset.id; go('detail'); },
   closesheet: () => { ui.sheet = null; ui.importData = null; },
   noop: (t, e) => { e.stopPropagation(); return false; },
-  step: (t) => {
-    const inp = $(t.dataset.input);
-    if (inp) {
-      const v = Math.max(0, (parseFloat(String(inp.value).replace(',', '.')) || 0) + parseFloat(t.dataset.delta));
-      inp.value = Math.round(v * 100) / 100;
-    }
+  step: (t, e) => {
+    // Pointer presses are handled (with hold-to-repeat) in the pointerdown
+    // listener below; only keyboard activation still needs a bump here.
+    if (pointerBumped) pointerBumped = false; else bump(t);
     return false; // keep focus/scroll; no re-render
   },
   logset: () => {
@@ -210,6 +208,39 @@ $('frame').addEventListener('click', (e) => {
   if (fn(t, e) === false) return;
   render();
 });
+/* ───────── Steppers: tap to bump, hold to repeat (accelerating) ───────── */
+
+function bump(btn) {
+  const inp = $(btn.dataset.input);
+  if (!inp) return;
+  const delta = parseFloat(btn.dataset.delta);
+  const v = Math.max(0, (parseFloat(String(inp.value).replace(',', '.')) || 0) + delta);
+  inp.value = Math.round(v * 100) / 100;
+}
+let holdTimer = null;
+let pointerBumped = false;
+function stopHold() { clearTimeout(holdTimer); holdTimer = null; }
+$('frame').addEventListener('pointerdown', (e) => {
+  const btn = e.target.closest('[data-act="step"]');
+  if (!btn || e.button > 0) return;
+  e.preventDefault(); // no focus steal, no text selection, no double-tap zoom
+  bump(btn);
+  pointerBumped = true;
+  if (btn.closest('.jumps')) return; // jump buttons are single taps
+  let n = 0;
+  const repeat = () => { bump(btn); n++; holdTimer = setTimeout(repeat, n < 6 ? 140 : n < 20 ? 70 : 35); };
+  holdTimer = setTimeout(repeat, 400);
+});
+document.addEventListener('pointerup', stopHold);
+// A cancelled press (e.g. it turned into a scroll) produces no click to consume the flag.
+document.addEventListener('pointercancel', () => { stopHold(); pointerBumped = false; });
+window.addEventListener('blur', stopHold);
+$('frame').addEventListener('contextmenu', (e) => { if (e.target.closest('[data-act="step"]')) e.preventDefault(); });
+// Tapping a number selects it, so typing replaces the value.
+$('frame').addEventListener('focusin', (e) => {
+  if (e.target.matches('.stepper-ctl input')) setTimeout(() => { try { e.target.select(); } catch (err) { /* ignore */ } }, 0);
+});
+
 $('frame').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.matches('[role="button"][data-act]')) { e.preventDefault(); e.target.click(); }
   if (e.key === 'Enter' && e.target.id === 'inp-bw') { e.preventDefault(); actions.logbw(); render(); }

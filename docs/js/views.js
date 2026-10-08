@@ -1,6 +1,6 @@
 /* Screen renderers. Each returns an HTML string; app.js swaps it into #app. */
 
-import { DAY_LABEL, MUSCLES, MUSCLE_LABEL, WEEK_TARGET, KG_STEP } from './program.js';
+import { DAY_LABEL, MUSCLES, MUSCLE_LABEL, WEEK_TARGET } from './program.js';
 import {
   store, getEx, exImg, dayType, dayItems, planFor, setsOf, sessionOf, isWorkout, lastSetsFor, lastKg,
   exHistory, allExIds, targetSets, exDone, workoutDates,
@@ -194,6 +194,16 @@ function musFigures(mus) {
     '<span><i style="background: color-mix(in srgb, var(--accent) 45%, var(--surface-3));"></i>Assisting</span></div>';
 }
 
+/* Weight increments scaled to the load: light dumbbells move in 0.5 kg,
+   machines and barbells in 2.5 kg, with one-tap jumps for bigger changes.
+   An exercise can pin its own fine step with customEx[id].step. */
+export function weightSteps(ex, kg) {
+  const w = kg || ex.kg || 0;
+  const tier = w >= 40 ? { fine: 2.5, jumps: [5, 10] } : w >= 15 ? { fine: 1, jumps: [2.5, 5] } : { fine: 0.5, jumps: [1, 2.5] };
+  if (typeof ex.step === 'number' && ex.step > 0) tier.fine = ex.step;
+  return tier;
+}
+
 /* Default values for the next set: same set number last session, else the
    previous set today, else the target/exercise default. */
 export function nextSetDefaults(id, date, idx) {
@@ -223,12 +233,16 @@ export function renderDetail() {
   const bw = ex.kg == null;
   const prs = prSetsOn(id, date);
 
-  const stepper = (inputId, label, val, step) =>
+  const stepper = (inputId, label, val, step, jumps) =>
     '<div class="stepper"><div class="stepper-label">' + label + '</div><div class="stepper-ctl">' +
-    '<button data-act="step" data-input="' + inputId + '" data-delta="-' + step + '" aria-label="Decrease ' + label + '">−</button>' +
-    '<input id="' + inputId + '" type="number" inputmode="decimal" step="' + step + '" min="0" value="' + (val == null ? '' : val) + '" aria-label="' + label + '">' +
-    '<button data-act="step" data-input="' + inputId + '" data-delta="' + step + '" aria-label="Increase ' + label + '">+</button>' +
-    '</div></div>';
+    '<button data-act="step" data-input="' + inputId + '" data-delta="-' + step + '" aria-label="Decrease ' + label + ' by ' + step + '">−</button>' +
+    '<input id="' + inputId + '" type="number" inputmode="decimal" step="any" min="0" value="' + (val == null ? '' : val) + '" aria-label="' + label + '">' +
+    '<button data-act="step" data-input="' + inputId + '" data-delta="' + step + '" aria-label="Increase ' + label + ' by ' + step + '">+</button>' +
+    '</div>' +
+    (jumps ? '<div class="jumps">' + [-jumps[1], -jumps[0], jumps[0], jumps[1]].map((d) =>
+      '<button data-act="step" data-input="' + inputId + '" data-delta="' + d + '">' + (d > 0 ? '+' : '−') + Math.abs(d) + '</button>').join('') + '</div>' : '') +
+    '</div>';
+  const ws = weightSteps(ex, def.kg);
 
   const setRows = sets.map((s, i) =>
     '<div class="set-line' + (ui.editIdx === i ? ' editing' : '') + '">' +
@@ -246,7 +260,7 @@ export function renderDetail() {
     '<div class="sub">Target ' + tg.sets + ' × ' + esc(tg.reps || '?') + (tg.coachKg && tg.kg != null && !bw ? ' @ ' + kgLabel(tg.kg) : '') + '</div></div>' +
     '<div class="steppers' + (bw ? ' single' : '') + '">' +
     stepper('inp-reps', ex.perArm ? 'Reps / arm' : 'Reps', def.r, 1) +
-    (bw ? '' : stepper('inp-kg', 'Weight kg', def.kg, KG_STEP)) +
+    (bw ? '' : stepper('inp-kg', 'Weight kg', def.kg, ws.fine, ws.jumps)) +
     '</div>' +
     '<div class="row" style="margin-top: 12px;">' +
     (editing
