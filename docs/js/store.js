@@ -8,12 +8,14 @@
      plans:     { "YYYY-MM-DD": { day, note?, ex: [id | { id, sets?, reps?, kg?, note? }] } },
      customEx:  { exId: { name, day, sets, reps, kg, ... } },  // new or overridden exercises
      program:   { push: [ids], pull: [ids] },                  // optional, overrides the default
+     schedule:  { days: { key: { name, title, ex: [...] } },   // optional repeating week;
+                  week: [key | null × 7, Monday first] },      // replaces the push/pull rotation
      body:      { "YYYY-MM-DD": kg },                          // bodyweight log
    }
    kg null = bodyweight. Everything keyed by date so the sync merge works per day. */
 
 import { EX, DEFAULT_PROGRAM, DAY_LABEL } from './program.js';
-import { addDays, niceDate, weekdayName } from './dates.js';
+import { addDays, niceDate, weekdayName, parseDate } from './dates.js';
 
 const STORE_KEY = 'gym-tracker-v1'; // unchanged since v1 so existing on-device logs carry over
 const COLLECTIONS = ['sessions', 'overrides', 'plans', 'customEx', 'body'];
@@ -27,10 +29,15 @@ export function emptyStore() {
 export function normalize(data) {
   const out = emptyStore();
   if (!data || typeof data !== 'object') return out;
+  // Keep fields this version doesn't know, so an older app never drops data
+  // that a newer app (or the coach) added.
+  for (const k of Object.keys(data)) if (!(k in out) && k !== 'program' && k !== 'schedule') out[k] = data[k];
   for (const c of COLLECTIONS) {
     if (data[c] && typeof data[c] === 'object' && !Array.isArray(data[c])) out[c] = data[c];
   }
   if (data.program && typeof data.program === 'object') out.program = data.program;
+  if (data.schedule && typeof data.schedule === 'object' && data.schedule.days && typeof data.schedule.days === 'object' &&
+    Array.isArray(data.schedule.week)) out.schedule = data.schedule;
   for (const [d, s] of Object.entries(out.sessions)) {
     if (!s || typeof s !== 'object') { delete out.sessions[d]; continue; }
     if (!s.sets || typeof s.sets !== 'object') s.sets = {};
@@ -165,15 +172,50 @@ export function lastKg(exId, beforeDate) {
   return kg === 0 ? null : kg;
 }
 
-/* Day type for a date: logged session > manual override > plan > rotation.
+/* ───────── Weekly schedule ───────── */
+
+export function hasSchedule() { return !!store.schedule; }
+export function scheduleDays() {
+  const days = store.schedule ? store.schedule.days : {};
+  return Object.keys(days).filter((k) => days[k] && Array.isArray(days[k].ex)).map((k) => ({ key: k, ...days[k] }));
+}
+function scheduleDay(key) {
+  const d = key && store.schedule && store.schedule.days[key];
+  return d && Array.isArray(d.ex) ? { key, ...d } : null;
+}
+/* The schedule day a date follows: a day picked in the app (override), the
+   one a logged session was started from, else the weekday's slot. Null on
+   rest days, on days switched to push/pull/rest, or without a schedule. */
+export function templateFor(date) {
+  if (!store.schedule) return null;
+  const o = store.overrides[date];
+  if (o) return scheduleDay(o);
+  const sess = sessionOf(date);
+  if (sess && sess.tpl) return scheduleDay(sess.tpl);
+  const wd = (parseDate(date).getDay() + 6) % 7;
+  return scheduleDay(store.schedule.week[wd]);
+}
+
+/* Header title for a date: coach plan title, schedule day title, day type. */
+export function dayTitle(date) {
+  const type = dayType(date);
+  const plan = planFor(date);
+  if (plan && plan.day === type) return typeof plan.title === 'string' && plan.title.trim() ? plan.title : null;
+  const t = templateFor(date);
+  return t && (t.title || t.name) ? t.title || t.name : null;
+}
+
+/* Day type for a date: logged session > manual override > plan > schedule > rotation.
    The rotation chains forward from the last real workout, alternating
    push/pull with a rest day between, so future days project the schedule. */
 export function dayType(date) {
   const sess = sessionOf(date);
   if (isWorkout(sess)) return sess.day;
-  if (store.overrides[date]) return store.overrides[date];
+  const o = store.overrides[date];
+  if (o) return DAY_LABEL[o] ? o : (scheduleDay(o) ? 'other' : 'rest');
   const plan = store.plans[date];
   if (plan && DAY_LABEL[plan.day]) return plan.day;
+  if (store.schedule) return templateFor(date) ? 'other' : 'rest';
   const last = lastWorkoutBefore(date);
   if (!last) return 'push';
   let lw = last, lt = store.sessions[last].day;
@@ -219,11 +261,13 @@ export function planFor(date) {
 export function dayItems(date) {
   const type = dayType(date);
   const plan = planFor(date);
+  const tpl = !plan || plan.day !== type ? templateFor(date) : null;
   const items = (plan && plan.day === type && Array.isArray(plan.ex))
     ? plan.ex.map(planItem).filter(Boolean).map((it) => ({ ...it, rolled: null }))
+    : tpl ? tpl.ex.map(planItem).filter(Boolean).map((it) => ({ ...it, rolled: null }))
     : programFor(type).map((id) => ({ id, target: null, rolled: null }));
   const last = type !== 'rest' && type !== 'other' ? lastWorkoutBefore(date) : null;
-  if (last && !plan) {
+  if (last && !plan && !tpl) {
     const lastType = store.sessions[last].day;
     for (const id of programFor(lastType)) {
       if (items.some((it) => it.id === id)) continue;
@@ -268,7 +312,9 @@ export function logSet(date, exId, r, kg) {
   let sess = store.sessions[date];
   if (!sess) {
     const t = dayType(date);
+    const tpl = templateFor(date);
     sess = store.sessions[date] = { day: t === 'rest' ? getEx(exId).day : t, sets: {} };
+    if (tpl) sess.tpl = tpl.key;
   }
   (sess.sets[exId] = sess.sets[exId] || []).push({ r, kg });
   sess.day = majorityDay(sess);
@@ -294,9 +340,14 @@ export function updateSet(date, exId, idx, r, kg) {
   const sets = setsOf(date, exId);
   if (sets[idx]) { sets[idx] = { r, kg }; save(); }
 }
+/* Switch a not-yet-logged day to push/pull/rest or to a schedule day key.
+   Picking the weekday's own schedule day clears the override. */
 export function setOverride(date, type) {
   if (isWorkout(sessionOf(date))) return;
-  store.overrides[date] = type;
+  delete store.overrides[date];
+  const wd = (parseDate(date).getDay() + 6) % 7;
+  const natural = store.schedule ? (store.schedule.week[wd] || 'rest') : null;
+  if (type !== natural) store.overrides[date] = type;
   save();
 }
 export function setBodyweight(date, kg) {

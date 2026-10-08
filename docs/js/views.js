@@ -3,7 +3,7 @@
 import { DAY_LABEL, MUSCLES, MUSCLE_LABEL, WEEK_TARGET } from './program.js';
 import {
   store, getEx, exImg, dayType, dayItems, planFor, setsOf, sessionOf, isWorkout, lastSetsFor, lastKg,
-  exHistory, allExIds, targetSets, exDone, workoutDates,
+  exHistory, allExIds, targetSets, exDone, workoutDates, dayTitle, templateFor, hasSchedule, scheduleDays,
 } from './store.js';
 import { todayStr, addDays, mondayOf, niceDate, weekdayName, isoWeek, relTime, parseDate } from './dates.js';
 import {
@@ -69,12 +69,18 @@ export function renderToday() {
   const doneCount = items.filter((it) => exDone(date, it)).length;
   const totalSets = items.reduce((n, it) => n + setsOf(date, it.id).length, 0);
 
-  const kicker = (isToday ? 'Today · ' : date > today ? 'Planned · ' : '') + weekdayName(date) + ' ' + niceDate(date);
-  const title = plan && typeof plan.title === 'string' && plan.title.trim() && plan.day === type ? esc(plan.title)
-    : type === 'rest' && !items.length ? 'Rest day' : DAY_LABEL[type] + ' day';
+  const tpl = templateFor(date);
+  const kicker = (isToday ? 'Today · ' : date > today ? 'Planned · ' : '') + weekdayName(date) + ' ' + niceDate(date) +
+    (tpl && tpl.name && tpl.title ? ' · ' + esc(tpl.name) : '');
+  const named = dayTitle(date);
+  const title = named ? esc(named) : type === 'rest' && !items.length ? 'Rest day' : DAY_LABEL[type] + ' day';
 
-  const seg = logged ? '' : '<div class="seg">' + ['push', 'pull', 'rest'].map((t) =>
-    '<button class="' + (t === type ? 'on' : '') + '" data-act="daytype" data-type="' + t + '">' + DAY_LABEL[t] + '</button>').join('') + '</div>';
+  // Switch the day before anything is logged: schedule days (or push/pull) plus rest.
+  const choices = hasSchedule()
+    ? [...scheduleDays().map((d) => [d.key, d.name || d.title || d.key, tpl && tpl.key === d.key]), ['rest', 'Rest', type === 'rest']]
+    : ['push', 'pull', 'rest'].map((t) => [t, DAY_LABEL[t], t === type]);
+  const seg = logged ? '' : '<div class="seg' + (hasSchedule() ? ' seg-scroll' : '') + '">' + choices.map(([k, l, on]) =>
+    '<button class="' + (on ? 'on' : '') + '" data-act="daytype" data-type="' + esc(k) + '">' + esc(l) + '</button>').join('') + '</div>';
 
   const nav = '<div class="date-nav">' +
     (isToday ? '' : '<button class="link-btn" data-act="gotoday">Today</button>') +
@@ -95,9 +101,11 @@ export function renderToday() {
     const sets = setsOf(date, it.id);
     const tg = itemTarget(it, date);
     const done = sets.length >= tg.sets;
+    const last = !sets.length ? lastSetsFor(it.id, date) : null;
     const meta = sets.length
       ? setsSummary(sets)
-      : tg.sets + ' × ' + (tg.reps || '?') + (ex.kg == null && tg.kg == null ? ' · bodyweight' : ' · ' + kgLabel(tg.kg));
+      : tg.sets + ' × ' + (tg.reps || '?') + (last ? ' · last ' + setsSummary(last.sets)
+        : ex.kg == null && tg.kg == null ? ' · bodyweight' : ' · ' + kgLabel(tg.kg));
     const prs = sets.length ? prSetsOn(it.id, date) : new Set();
     const dots = '<span class="set-dots">' + Array.from({ length: Math.max(tg.sets, sets.length) }, (_, i) =>
       '<i class="' + (i < sets.length ? 'on' : '') + '"></i>').join('') + '</span>';
@@ -123,7 +131,8 @@ export function renderToday() {
 
   return '<div class="screen" data-scroll="today">' +
     '<div class="today-head"><div><div class="kicker">' + kicker + '</div><h1 class="title">' + title + '</h1></div>' + syncDot() + '</div>' +
-    '<div class="between" style="margin-top: 12px;">' + (seg || '<span class="pill">' + plural(totalSets, 'set') + ' logged</span>') + nav + '</div>' +
+    '<div class="between" style="margin-top: 12px;">' + (seg && !hasSchedule() ? seg : '<span class="pill">' + plural(totalSets, 'set') + ' logged</span>') + nav + '</div>' +
+    (seg && hasSchedule() ? '<div style="margin-top: 10px;">' + seg + '</div>' : '') +
     progress + note +
     '<div class="ex-list">' + empty + cards + '</div>' +
     '<button class="btn btn-ghost btn-block" data-act="addex" style="margin-top: 12px;">' + I.plus + 'Add exercise</button>' +
@@ -212,12 +221,22 @@ export function nextSetDefaults(id, date, idx) {
   const prev = lastSetsFor(id, date);
   const item = dayItems(date).find((it) => it.id === id);
   const tkg = item && item.target && item.target.kg !== undefined ? item.target.kg : undefined;
-  let r = ex.repDefault, kg = ex.kg == null ? null : lastKg(id, date);
-  if (sets.length && idx > 0) { r = sets[sets.length - 1].r; if (ex.kg != null) kg = sets[sets.length - 1].kg ?? kg; }
-  else if (prev && prev.sets[idx]) { r = prev.sets[idx].r; if (ex.kg != null) kg = prev.sets[idx].kg ?? kg; }
-  if (tkg !== undefined && !sets.length) kg = tkg;
-  if (ex.kg != null && kg == null) kg = 0;
-  return { r, kg };
+  const weighted = ex.kg != null;
+  let r = ex.repDefault, kg = weighted ? lastKg(id, date) : null, from = null;
+  if (sets.length) {
+    // Later sets start from what you just logged.
+    const s = sets[sets.length - 1];
+    r = s.r; if (weighted && s.kg != null) kg = s.kg;
+    from = 'set ' + sets.length;
+  } else if (prev && prev.sets.length) {
+    // First set starts from the same set last time (or its last set).
+    const s = prev.sets[Math.min(idx, prev.sets.length - 1)];
+    r = s.r; if (weighted && s.kg != null) kg = s.kg;
+    from = 'last time (' + shortDate(prev.date) + ')';
+  }
+  if (tkg !== undefined && !sets.length) { kg = tkg; from = 'coach target'; }
+  if (weighted && kg == null) kg = 0;
+  return { r, kg, from };
 }
 
 export function renderDetail() {
@@ -262,6 +281,7 @@ export function renderDetail() {
     stepper('inp-reps', ex.perArm ? 'Reps / arm' : 'Reps', def.r, 1) +
     (bw ? '' : stepper('inp-kg', 'Weight kg', def.kg, ws.fine, ws.jumps)) +
     '</div>' +
+    (!editing && def.from ? '<div class="sub" style="margin-top: 8px; font-size: 12.5px; text-align: center;">Starting from ' + esc(def.from) + '</div>' : '') +
     '<div class="row" style="margin-top: 12px;">' +
     (editing
       ? '<button class="btn btn-lg" data-act="saveedit" style="flex: 1;">Save set ' + (ui.editIdx + 1) + '</button>' +
@@ -348,8 +368,9 @@ export function renderWeek() {
     if (logged) { workouts++; sets += n; }
     const missed = !logged && !isToday && !future && type !== 'rest';
     const plan = planFor(date);
+    const named = dayTitle(date);
     const label = type === 'rest' && !items.length ? 'Rest' : missed ? 'No training'
-      : plan && typeof plan.title === 'string' && plan.title.trim() && plan.day === type ? esc(plan.title) : DAY_LABEL[type] + ' day';
+      : named ? esc(named) : DAY_LABEL[type] + ' day';
     const sub = logged ? plural(n, 'set') + ' · ' + plural(Object.keys(sess.sets).length, 'exercise')
       : future && items.length ? (plan ? 'Planned by coach · ' : 'Planned · ') + plural(items.length, 'exercise')
       : isToday && items.length ? plural(items.length, 'exercise') : '';
